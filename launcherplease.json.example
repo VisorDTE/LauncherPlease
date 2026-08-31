@@ -1,0 +1,15 @@
+{
+  "columns": 8,
+  "layout": "compact",
+  "showChords": true,
+  "showCategories": true,
+  "captureChords": true,
+  "duration": 0,
+  "groupOrder": ["Most used", "Web apps", "Games", "Development", "Office", "Multimedia", "Internet", "System", "TUIs", "Apps"],
+  "favorites": ["Terminal", "Browser", "Editor", "ChatGPT", "Agent"],
+  "exclude": ["Google Maps"],
+  "categories": { "Tmux": "System" },
+  "mostUsedCount": 8,
+  "mostUsedDays": 14,
+  "effects": { "pulse": true, "glow": true, "bounce": true }
+}
