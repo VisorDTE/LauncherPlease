@@ -49,9 +49,11 @@ test("effects merge independently and disable cleanly", () => {
   assert.equal(cfg2.effects.pulse, true)
 })
 
-test("layout selects roomy and rejects unknown values", () => {
+test("layout selects roomy and list, rejects unknown values", () => {
   const roomy = Config.merge(JSON.stringify({ layout: "roomy" }), "{}")
   assert.equal(roomy.layout, "roomy")
+  const list = Config.merge(JSON.stringify({ layout: "list" }), "{}")
+  assert.equal(list.layout, "list")
   const bad = Config.merge(JSON.stringify({ layout: "spacious" }), "{}")
   assert.equal(bad.layout, "compact")
   const payload = Config.merge("{}", JSON.stringify({ layout: "roomy" }))

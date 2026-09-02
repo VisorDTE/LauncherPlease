@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "Jose",
   "license": "MIT",
-  "description": "Themed overlay grid of every app that has a shortcut: your most-used apps, grouped by category, with pulse, glow and retro-bounce selection feedback.",
+  "description": "Themed overlay of every app that has a shortcut — category grid or right-docked list, with full-text search.",
   "kinds": [
     "overlay"
   ],

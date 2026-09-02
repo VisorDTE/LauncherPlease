@@ -24,13 +24,24 @@ test("buildFilter excludes by label and id", () => {
   assert.equal(filter({ label: "Terminal", id: "terminal" }), true)
 })
 
-test("matchesFilter searches label, chord and command", () => {
-  const app = { label: "ChatGPT", chord: "SUPER + SHIFT + A", command: "omarchy-launch-webapp" }
+test("matchesFilter does full-text search across fields", () => {
+  const app = {
+    id: "chatgpt",
+    label: "ChatGPT",
+    category: "Web apps",
+    chord: "SUPER + SHIFT + A",
+    command: "omarchy-launch-webapp"
+  }
   assert.equal(Model.matchesFilter(app, ""), true)
   assert.equal(Model.matchesFilter(app, "chat"), true)
   assert.equal(Model.matchesFilter(app, "SHIFT + A"), true)
   assert.equal(Model.matchesFilter(app, "webapp"), true)
-  assert.equal(Model.matchesFilter(app, "zzz"), false)
+  // category, id and any-word matching
+  assert.equal(Model.matchesFilter(app, "web"), true)
+  assert.equal(Model.matchesFilter(app, "chatgpt"), true)
+  assert.equal(Model.matchesFilter(app, "maps"), false)
+  // loose full-text: any of the words matches
+  assert.equal(Model.matchesFilter(app, "maps chat"), true)
 })
 
 test("arrange honors favorites at top of each category and groupOrder", () => {

@@ -40,7 +40,7 @@ function numberOr(value, fallback) {
 }
 
 function layoutOr(value, fallback) {
-  if (value === "roomy" || value === "compact") return value
+  if (value === "roomy" || value === "compact" || value === "list") return value
   return fallback
 }
 

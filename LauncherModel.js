@@ -37,9 +37,19 @@ function buildFilter(exclude) {
 function matchesFilter(app, text) {
   var q = String(text || "").trim().toLowerCase()
   if (!q) return true
-  return app.label.toLowerCase().indexOf(q) >= 0 ||
-    app.chord.toLowerCase().indexOf(q) >= 0 ||
-    app.command.toLowerCase().indexOf(q) >= 0
+  var words = q.split(/\s+/)
+  var haystack = [
+    String(app.label || ""),
+    String(app.category || ""),
+    String(app.chord || ""),
+    String(app.command || ""),
+    String(app.id || "")
+  ].join(" ").toLowerCase()
+  for (var i = 0; i < words.length; i++) {
+    // Any word matching any field keeps the app (loose full-text search).
+    if (haystack.indexOf(words[i]) >= 0) return true
+  }
+  return false
 }
 
 // Returns the ordered category list honoring groupOrder; unknown categories go

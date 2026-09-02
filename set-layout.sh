@@ -1,12 +1,12 @@
 #!/bin/bash
-# Persist the chosen grid layout to ~/.config/omarchy/launcherplease.json.
-# Usage: set-layout.sh <compact|roomy>
+# Persist the chosen layout to ~/.config/omarchy/launcherplease.json.
+# Usage: set-layout.sh <compact|roomy|list>
 
 set -euo pipefail
 
 mode="${1:-compact}"
 case "$mode" in
-  compact|roomy) ;;
+  compact|roomy|list) ;;
   *) exit 0 ;;
 esac
 

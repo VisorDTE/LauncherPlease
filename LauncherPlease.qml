@@ -34,6 +34,7 @@ Item {
   property bool chordsCaptured: false
   property int gridHeight: 0
 
+  property bool isList: false
   readonly property string home: Quickshell.env("HOME")
   readonly property string pluginDir: root.home + "/.config/omarchy/plugins/jose.launcherplease"
   readonly property string listPath: root.pluginDir + "/list.sh"
@@ -47,6 +48,8 @@ Item {
   property color scrim: Color.menu.scrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
+  property color selectedBorderColor: Color.menu.selectedBorder
+  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", root.selectedBorderColor, 0)
   property color accent: Color.accent
   property var borderSpec: Border.surfaceSpec("menu", "border", root.borderColor, Math.max(1, Style.space(2)))
   readonly property int cornerRadius: Style.cornerRadius
@@ -54,16 +57,26 @@ Item {
 
   property int columns: 8
   readonly property int cellH: Style.space(92)
+  readonly property int listMargin: Math.max(Style.gapsOut * 2, Style.spacing.md)
+  readonly property int listRowH: Math.max(Style.space(44), Style.font.body + Style.font.caption + Style.spacing.md)
+  readonly property int listIconH: Math.min(Style.space(22), root.listRowH - Style.spacing.md * 2)
+  readonly property int searchH: Math.max(Style.space(26), Style.font.body + Style.spacing.controlPaddingY * 2)
   readonly property int headerH: Math.max(Style.space(22), Style.font.subtitle + Style.spacing.xs)
   readonly property int footerH: Math.max(Style.space(20), Style.font.caption + Style.spacing.sm)
   readonly property int contentMargin: Style.spacing.md
   readonly property int gridGap: Style.spacing.xs
   readonly property int iconH: Style.space(28)
-  readonly property int keycapH: Style.space(16)
-  readonly property int keycapFont: Style.font.caption - 1
-  readonly property real keycapCharW: (Style.font.caption - 1) * 0.6
-  readonly property int keycapPadX: Style.space(3)
+  readonly property int keycapH: Style.space(17)
+  readonly property int keycapFont: Style.font.caption
+  readonly property real keycapCharW: Style.font.caption * 0.6
+  readonly property int keycapPadX: Style.space(4)
   readonly property int keycapGap: Style.space(3)
+  readonly property color keycapFill: Util.alpha(root.accent, 0.13)
+  readonly property color keycapFillCursor: Util.alpha(root.selectedText, 0.2)
+  readonly property color keycapBorder: Util.alpha(root.accent, 0.6)
+  readonly property color keycapBorderCursor: Util.alpha(root.selectedText, 0.7)
+  readonly property color keycapText: root.foreground
+  readonly property color keycapTextCursor: root.selectedText
 
   function iconUrl(icon) {
     var value = String(icon || "")
@@ -73,9 +86,67 @@ Item {
     return themed && themed.length ? themed : ""
   }
 
+  // Monospace advance approximations (the shell font is effectively mono), used
+  // to auto-size the list panel so the shortcut column hugs the app name with a
+  // small fixed gap and only widens when a long name needs the room.
+  function nameWidthPx(label) {
+    return String(label || "").length * Style.font.body * 0.6
+  }
+
+  function chordWidthPx(chord) {
+    var keys = ChordKey.chordKeys(chord)
+    if (!keys.length) return 0
+    var total = 0
+    for (var i = 0; i < keys.length; i++) {
+      total += String(keys[i]).length * root.keycapCharW + root.keycapPadX * 2
+    }
+    total += (keys.length - 1) * root.keycapGap
+    return Math.ceil(total)
+  }
+
+  // Widest visible row measured as icon + name + gap + shortcut. The panel is
+  // only as wide as its content demands, clamped to stay on screen.
+  property int listFitW: 0
+  property int listCardW: 0
+
+  function computeListFit() {
+    var w = 0
+    var cap = Math.floor(Style.space(420))
+    for (var i = 0; i < root.apps.length; i++) {
+      var nameW = Math.min(root.nameWidthPx(root.apps[i].label), cap)
+      var chordW = root.cfg.showChords ? root.chordWidthPx(root.apps[i].chord) : 0
+      var row = nameW + chordW
+      if (row > w) w = row
+    }
+    root.listFitW = w
+    root.listCardW = root.computeListCardW()
+  }
+
+  function computeListCardW() {
+    // icon slot + 4 md gaps (outer margins, around name, before shortcut)
+    var pw = Number(panel.width)
+    if (!isFinite(pw) || pw <= 0) pw = 1920
+    var content = root.listFitW + root.listIconH + Style.spacing.md * 4
+    var minW = Style.space(240)
+    var maxW = Style.space(560)
+    var res = Math.min(maxW, Math.max(minW, Math.min(content, pw - root.listMargin * 2)))
+    return Math.round(res)
+  }
+
+  function listCardWidth() {
+    if (root.listCardW > 0) return root.listCardW
+    return root.computeListCardW()
+  }
+
   function applyConfig() {
     root.cfg = LauncherConfig.merge(root.fileConfigRaw, root.payloadConfigRaw)
     root.columns = Math.max(1, root.cfg.columns)
+    root.isList = root.cfg.layout === "list"
+  }
+
+  function rowHeight(rowType) {
+    if (rowType === "banner") return root.headerH
+    return root.isList ? root.listRowH : root.cellH
   }
 
   function rebuild() {
@@ -87,7 +158,12 @@ Item {
     var days = LauncherUsage.prune(LauncherUsage.parseDays(root.usageRaw), LauncherUsage.dayKey(), root.cfg.mostUsedDays)
     var arranged = LauncherModel.arrange(filtered, root.cfg, LauncherUsage.scores(days))
     root.apps = arranged.apps
-    root.layout = GridLayout.build(root.apps, root.columns, root.cfg.layout)
+    if (root.isList) {
+      root.layout = GridLayout.buildList(root.apps, root.cfg.showCategories)
+      root.computeListFit()
+    } else {
+      root.layout = GridLayout.build(root.apps, root.columns, root.cfg.layout)
+    }
 
     if (!root.layout.count) root.cursorIndex = 0
     else if (root.cursorIndex >= root.layout.count) root.cursorIndex = root.layout.count - 1
@@ -96,7 +172,7 @@ Item {
     var height = 0
     var rows = root.layout.rows || []
     for (var r = 0; r < rows.length; r++) {
-      height += rows[r].type === "banner" ? root.headerH : root.cellH
+      height += root.rowHeight(rows[r].type)
       if (r > 0) height += Style.spacing.xs
     }
     root.gridHeight = height
@@ -105,7 +181,10 @@ Item {
   function onListLoaded(raw) {
     try { root.rawApps = JSON.parse(String(raw || "[]")) } catch (e) { root.rawApps = [] }
     root.rebuild()
-    if (root.opened) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    if (root.opened) {
+      root.scrollToCursor()
+      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    }
   }
 
   function refreshList() {
@@ -136,9 +215,13 @@ Item {
   }
 
   function toggleLayout() {
-    var next = root.cfg.layout === "roomy" ? "compact" : "roomy"
+    var order = ["compact", "roomy", "list"]
+    var cur = order.indexOf(root.cfg.layout)
+    var next = order[(cur + 1) % order.length]
     root.cfg.layout = next
+    root.isList = next === "list"
     root.rebuild()
+    root.scrollToCursor()
     setLayoutProc.command = ["bash", root.setLayoutPath, next]
     setLayoutProc.running = false
     setLayoutProc.running = true
@@ -150,10 +233,10 @@ Item {
     var y = 0
     var rows = root.layout.rows || []
     for (var i = 0; i < row && i < rows.length; i++) {
-      y += rows[i].type === "banner" ? root.headerH : root.cellH
+      y += root.rowHeight(rows[i].type)
       y += Style.spacing.xs
     }
-    var rowH = (rows[row] && rows[row].type === "banner") ? root.headerH : root.cellH
+    var rowH = (rows[row] && rows[row].type === "banner") ? root.headerH : root.rowHeight(rows[row] ? rows[row].type : "")
     if (y < flick.contentY) flick.contentY = y
     else if (y + rowH > flick.contentY + flick.height) flick.contentY = Math.max(0, y + rowH - flick.height)
   }
@@ -175,6 +258,7 @@ Item {
     root.bounceIndex = -1
     root.filterText = ""
     root.refreshList()
+    if (flick) flick.contentY = 0
     if (root.cfg.duration > 0) {
       autoCloseTimer.interval = root.cfg.duration
       autoCloseTimer.restart()
@@ -465,10 +549,12 @@ Item {
 
       BorderSurface {
         id: card
-        width: Math.min(panel.width * 0.75, panel.width - Style.gapsOut * 4)
-        height: Math.min(root.headerH + root.footerH + root.gridHeight + root.contentMargin * 2 + Style.spacing.sm * 2,
-                         panel.height - Style.gapsOut * 2)
-        anchors.centerIn: parent
+        x: root.isList ? (parent.width - width - root.listMargin) : (parent.width - width) / 2
+        y: root.isList ? root.listMargin : (parent.height - height) / 2
+        width: root.isList ? root.listCardWidth() : Math.min(panel.width * 0.75, panel.width - Style.gapsOut * 4)
+        height: root.isList ? parent.height - root.listMargin * 2
+                           : Math.min(root.searchH + root.footerH + root.gridHeight + root.contentMargin * 2 + Style.spacing.sm * 2,
+                                      panel.height - Style.gapsOut * 2)
         radius: root.cornerRadius
         color: root.background
         borderSpec: root.borderSpec
@@ -486,30 +572,85 @@ Item {
           anchors.leftMargin: card.contentLeftInset
           spacing: Style.spacing.sm
 
-          Item {
+          Rectangle {
+            id: searchBox
             width: parent.width
-            height: root.headerH
+            height: root.searchH
+            radius: root.cornerRadius
+            color: Util.alpha(root.foreground, 0.06)
+            border.color: Util.alpha(root.accent, 0.35)
+            border.width: root.filterText ? 1 : 0
+            clip: true
 
-            Text {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              text: root.filterText ? root.filterText : "Shortcut apps"
-              color: root.foreground
-              opacity: root.filterText ? 1 : 0.72
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.heading
-              elide: Text.ElideRight
+            MouseArea {
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.IBeamCursor
+              onClicked: keyCatcher.forceActiveFocus()
+            }
+
+            Item {
+              anchors.fill: parent
+              anchors.leftMargin: Style.spacing.md
+              anchors.rightMargin: Style.spacing.md
+
+              Text {
+                id: searchIcon
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\uf002"
+                color: root.foreground
+                opacity: 0.55
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Text {
+                id: searchText
+                anchors.left: searchIcon.right
+                anchors.leftMargin: Style.spacing.sm
+                anchors.right: clearSearch.visible ? clearSearch.left : parent.right
+                anchors.rightMargin: Style.spacing.sm
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.filterText ? root.filterText : "Buscar apps…"
+                color: root.foreground
+                opacity: root.filterText ? 1 : 0.5
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                elide: Text.ElideRight
+              }
+
+              Text {
+                id: clearSearch
+                visible: root.filterText.length > 0
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                text: "\uf00d"
+                color: root.foreground
+                opacity: 0.7
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+
+                MouseArea {
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.setFilter("")
+                    keyCatcher.forceActiveFocus()
+                  }
+                }
+              }
             }
           }
 
           Flickable {
             id: flick
             width: parent.width
-            height: parent.height - root.headerH - root.footerH - Style.spacing.sm
+            height: parent.height - root.searchH - root.footerH - Style.spacing.sm
             clip: true
             contentWidth: width
-            contentHeight: gridCol.height
+            contentHeight: root.gridHeight
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.VerticalFlick
             interactive: true
@@ -531,25 +672,36 @@ Item {
                   readonly property var rowItems: (rowObj && rowObj.items) ? rowObj.items : []
                   readonly property real slotW: (width - (root.columns - 1) * root.gridGap) / root.columns
                   readonly property bool startsCategory: rowObj ? (rowObj.type === "banner" || (rowObj.items && rowObj.items.length && rowObj.items[0].kind === "header")) : false
+                  readonly property int listAppIndex: (!root.isList || rowItem.isBanner || rowItem.rowItems.length === 0) ? -1 : (rowItem.rowItems[0].appIndex >= 0 ? rowItem.rowItems[0].appIndex : -1)
+                  readonly property var listApp: rowItem.listAppIndex >= 0 ? root.apps[rowItem.listAppIndex] : null
+                  readonly property string listIcon: rowItem.listApp ? rowItem.listApp.icon : ""
+                  readonly property string listGlyph: rowItem.listApp ? rowItem.listApp.glyph : ""
+                  readonly property string listIconFont: rowItem.listApp ? rowItem.listApp.iconFont : ""
+                  readonly property string listLabel: rowItem.listApp ? rowItem.listApp.label : ""
+                  readonly property string listChord: rowItem.listApp ? rowItem.listApp.chord : ""
+                  readonly property string listIconSrc: root.iconUrl(rowItem.listIcon)
+                  readonly property var listChordKeys: ChordKey.chordKeys(rowItem.listChord)
 
                   width: gridCol.width
-                  height: isBanner ? root.headerH : root.cellH
+                  height: rowItem.isBanner ? root.headerH : (root.isList ? root.listRowH : root.cellH)
                   clip: true
 
                   Text {
                     visible: rowItem.isBanner
                     anchors.fill: parent
+                    anchors.leftMargin: root.isList ? Style.spacing.md : 0
+                    anchors.rightMargin: root.isList ? Style.spacing.md : 0
                     verticalAlignment: Text.AlignVCenter
                     text: root.cfg.showCategories && rowObj ? (rowObj.label + " · " + rowObj.count) : ""
                     color: root.accent
                     opacity: 0.85
                     font.family: root.fontFamily
-                    font.pixelSize: Style.font.title
-                    font.bold: true
+                    font.pixelSize: root.isList ? Style.font.caption : Style.font.title
+                    font.bold: root.isList ? false : true
                   }
 
                   Row {
-                    visible: !rowItem.isBanner
+                    visible: !rowItem.isBanner && !root.isList
                     anchors.fill: parent
                     spacing: root.gridGap
 
@@ -703,18 +855,19 @@ Item {
 
                                       height: root.keycapH
                                       width: keyText.implicitWidth + root.keycapPadX * 2
-                                      radius: Style.space(4)
-                                      color: cell.hasCursor ? Util.alpha(root.selectedText, 0.18) : Util.alpha(root.foreground, 0.08)
-                                      border.color: cell.hasCursor ? Util.alpha(root.selectedText, 0.45) : "transparent"
+                                      radius: Math.min(root.cornerRadius, Style.space(4))
+                                      color: cell.hasCursor ? root.keycapFillCursor : root.keycapFill
+                                      border.color: cell.hasCursor ? root.keycapBorderCursor : root.keycapBorder
                                       border.width: 1
 
                                       Text {
                                         id: keyText
                                         anchors.centerIn: parent
                                         text: keyLabel
-                                        color: cell.hasCursor ? root.selectedText : root.foreground
+                                        color: cell.hasCursor ? root.keycapTextCursor : root.keycapText
                                         font.family: root.fontFamily
                                         font.pixelSize: root.keycapFont
+                                        font.bold: true
                                       }
                                     }
                                   }
@@ -745,8 +898,129 @@ Item {
                     }
                   }
 
+                  BorderSurface {
+                    id: listItem
+                    visible: root.isList && !rowItem.isBanner && rowItem.listAppIndex >= 0
+                    anchors.fill: parent
+                    radius: root.cornerRadius
+                    readonly property bool listHasCursor: root.cursorActive && rowItem.listAppIndex === root.cursorIndex
+                    color: listHasCursor ? root.selectedBackground : "transparent"
+                    borderSpec: listHasCursor ? root.selectedBorderSpec : Border.none()
+
+                    Behavior on color { ColorAnimation { duration: 90 } }
+
+                    Item {
+                      id: listContent
+                      anchors.fill: parent
+                      anchors.topMargin: listItem.borderTop
+                      anchors.rightMargin: listItem.contentRightInset + Style.spacing.md
+                      anchors.bottomMargin: listItem.borderBottom
+                      anchors.leftMargin: listItem.contentLeftInset + Style.spacing.md
+                      clip: true
+
+                      Item {
+                        id: listIconSlot
+                        width: root.listIconH
+                        height: root.listIconH
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+
+                        Image {
+                          id: listIconImg
+                          anchors.centerIn: parent
+                          width: root.listIconH
+                          height: root.listIconH
+                          sourceSize: Qt.size(root.listIconH * 2, root.listIconH * 2)
+                          source: rowItem.listIconSrc
+                          fillMode: Image.PreserveAspectFit
+                          visible: rowItem.listIconSrc !== "" && status !== Image.Error
+                          asynchronous: true
+                        }
+
+                        Text {
+                          anchors.centerIn: parent
+                          visible: !listIconImg.visible
+                          text: rowItem.listGlyph || "󰈉"
+                          color: listItem.listHasCursor ? root.selectedText : root.foreground
+                          font.family: rowItem.listIconFont ? rowItem.listIconFont : root.fontFamily
+                          font.pixelSize: root.listIconH
+                        }
+                      }
+
+                      Text {
+                        anchors.left: listIconSlot.right
+                        anchors.leftMargin: Style.spacing.md
+                        anchors.right: listKeysSlot.left
+                        anchors.rightMargin: Style.spacing.md
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: rowItem.listLabel
+                        color: listItem.listHasCursor ? root.selectedText : root.foreground
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.body
+                        elide: Text.ElideMiddle
+                      }
+
+                      Item {
+                        id: listKeysSlot
+                        visible: root.cfg.showChords && rowItem.listChordKeys.length > 0
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: root.cfg.showChords && rowItem.listChordKeys.length > 0 ? listKeysRow.implicitWidth : 0
+                        height: root.keycapH
+
+                        Row {
+                          id: listKeysRow
+                          spacing: root.keycapGap
+
+                          Repeater {
+                            model: rowItem.listChordKeys.length
+
+                            delegate: Rectangle {
+                              required property int index
+                              readonly property string keyLabel: rowItem.listChordKeys[index]
+
+                              height: root.keycapH
+                              width: listKeyText.implicitWidth + root.keycapPadX * 2
+                              radius: Math.min(root.cornerRadius, Style.space(4))
+                              color: listItem.listHasCursor ? root.keycapFillCursor : root.keycapFill
+                              border.color: listItem.listHasCursor ? root.keycapBorderCursor : root.keycapBorder
+                              border.width: 1
+
+                              Text {
+                                id: listKeyText
+                                anchors.centerIn: parent
+                                text: keyLabel
+                                color: listItem.listHasCursor ? root.keycapTextCursor : root.keycapText
+                                font.family: root.fontFamily
+                                font.pixelSize: root.keycapFont
+                                font.bold: true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+
+                    MouseArea {
+                      id: listMouseArea
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onContainsMouseChanged: if (containsMouse && rowItem.listAppIndex >= 0) {
+                        root.cursorActive = true
+                        root.cursorIndex = rowItem.listAppIndex
+                      }
+                      onClicked: {
+                        if (rowItem.listAppIndex < 0) return
+                        root.cursorIndex = rowItem.listAppIndex
+                        keyCatcher.forceActiveFocus()
+                        root.launchApp(rowItem.listAppIndex)
+                      }
+                    }
+                  }
+
                   Rectangle {
-                    visible: rowItem.startsCategory && rowItem.index > 0
+                    visible: !root.isList && rowItem.startsCategory && rowItem.index > 0
                     anchors.top: parent.top
                     anchors.left: parent.left
                     anchors.right: parent.right
@@ -765,7 +1039,9 @@ Item {
             Text {
               anchors.fill: parent
               verticalAlignment: Text.AlignVCenter
-              text: "↑↓←→ mover   Tab categoría   Ctrl+Tab layout   ↵ abrir   Esc cerrar"
+              text: root.isList
+                    ? "↑↓ mover   Tab categoría   Ctrl+Tab layout   ↵ abrir   Esc cerrar"
+                    : "↑↓←→ mover   Tab categoría   Ctrl+Tab layout   ↵ abrir   Esc cerrar"
               color: root.foreground
               opacity: 0.5
               font.family: root.fontFamily

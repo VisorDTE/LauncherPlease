@@ -113,6 +113,44 @@ function build(apps, columns, mode) {
   }
 }
 
+// Single-column list layout used by the "list" mode: one app per row,
+// optionally with a full-width category banner before each group. Navigation
+// and layout shapes match the grid so the shell and tests can share them.
+function buildList(apps, withHeaders) {
+  var rows = []
+  var pos = []
+  var rowApps = []
+  var catApps = {}
+  var catOrder = categoryOrder(apps)
+
+  for (var c = 0; c < catOrder.length; c++) {
+    var category = catOrder[c]
+    var members = membersOf(apps, category)
+    if (members.length === 0) continue
+    catApps[category] = members
+    if (withHeaders) {
+      rows.push({ type: "banner", label: category, count: members.length })
+    }
+    for (var i = 0; i < members.length; i++) {
+      var rowIndex = rows.length
+      rows.push({ type: "row", items: [{ kind: "cell", appIndex: members[i] }] })
+      pos[members[i]] = { row: rowIndex, col: 0 }
+      rowApps[rowIndex] = [members[i]]
+    }
+  }
+
+  return {
+    apps: apps,
+    rows: rows,
+    pos: pos,
+    rowApps: rowApps,
+    catApps: catApps,
+    catStarts: categoryStarts(apps),
+    columns: 1,
+    count: apps.length
+  }
+}
+
 function left(layout, idx) {
   if (layout.count <= 1) return 0
   return (idx - 1 + layout.count) % layout.count
@@ -182,5 +220,5 @@ function colOf(layout, idx) {
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { build: build, move: move, categoryJump: categoryJump, rowOf: rowOf, colOf: colOf }
+  module.exports = { build: build, buildList: buildList, move: move, categoryJump: categoryJump, rowOf: rowOf, colOf: colOf }
 }

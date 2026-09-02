@@ -109,6 +109,35 @@ test("categoryJump moves to first app of next/prev category and wraps", () => {
   assert.equal(Grid.categoryJump(layout, 1, -1), 0)
 })
 
+test("buildList gives one row per app with optional banners", () => {
+  const apps = [
+    app("Steam", "Games"),
+    app("Editor", "Development"), app("Agent", "Development"),
+    app("ChatGPT", "Web apps")
+  ]
+  const plain = Grid.buildList(apps, false)
+  assert.equal(plain.count, 4)
+  assert.equal(plain.rows.length, 4)
+  assert.ok(plain.rows.every((r) => r.type === "row"))
+  assert.equal(plain.columns, 1)
+
+  const headed = Grid.buildList(apps, true)
+  const banners = headed.rows.filter((r) => r.type === "banner")
+  assert.deepEqual(banners.map((b) => b.label), ["Games", "Development", "Web apps"])
+  assert.equal(headed.count, 4)
+  assert.equal(Grid.rowOf(headed, 0), 1)
+  assert.equal(Grid.rowOf(headed, 3), headed.rows.length - 1)
+})
+
+test("list navigation walks apps row by row", () => {
+  const apps = [app("A", "X"), app("B", "X"), app("C", "Y")]
+  const layout = Grid.buildList(apps, true)
+  assert.equal(Grid.move(layout, 0, "down"), 1)
+  assert.equal(Grid.move(layout, 2, "up"), 1)
+  assert.equal(Grid.move(layout, 0, "up"), 2)
+  assert.equal(Grid.move(layout, 2, "down"), 0)
+})
+
 test("categoryJump is a no-op on empty and single-category layouts", () => {
   const empty = Grid.build([], 3)
   assert.equal(Grid.categoryJump(empty, 0, 1), 0)

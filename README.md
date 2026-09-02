@@ -1,8 +1,10 @@
 # LauncherPlease
 
-A themed overlay grid of every app that has a shortcut, for [Omarchy](https://omarchy.org) Quattro (Hyprland + omarchy-shell).
+A themed overlay of every app that has a shortcut, for [Omarchy](https://omarchy.org) Quattro (Hyprland + omarchy-shell). Shows as a category grid, or as a right-docked full-height list.
 
-Supporting Omarchy from El Salvador, Central America! WindowsPlease's little sibling. Greetings, Jose.
+![Category grid](preview.png)
+
+![Right-docked list](preview-list.png)
 
 ## What it does
 
@@ -31,9 +33,10 @@ Different from the standard launcher (`SUPER + SPACE`): that opens the full root
 ## Selection feedback
 
 - **Navigate** with `↑↓←→` (or `PgUp`/`PgDn`) or the mouse — the focused cell **breathes** (scale pulse) with an **accent glow** ring from the current theme.
-- **Tab** jumps between categories (first app of the next/previous category); **Ctrl+Tab** toggles the two layouts. The chosen layout is saved to `launcherplease.json` for next time.
+- **Tab** jumps between categories (first app of the next/previous category); **Ctrl+Tab** cycles the three layouts: grid *compact* → grid *roomy* → right-side *list*. The chosen layout is saved to `launcherplease.json` for next time.
+- The **list** layout is a right-docked, full-height panel whose width auto-fits its content (it only grows when a long app name needs room). Every row shows the app icon on the left, the app name, and the shortcut pinned to the panel's right edge. Category headers follow the `showCategories` toggle.
 - **Confirm** with `Enter`, a click, **or by pressing the app's own shortcut** while the overlay is open (e.g. `SUPER + SHIFT + E` for Email). The cell does a **retro bounce** with an expanding **accent burst ring**, then launches.
-- **Type** to filter by name; `Esc` clears the filter, then closes.
+- **Search** with the box at the top: full-text search across name, category, shortcut, command and id. Type several words and any of them matching keeps the app. `Esc` clears the search, then closes.
 - Follows the active Omarchy theme automatically via the shell's `Color.menu` / `Style` tokens.
 
 ## Install
@@ -77,9 +80,9 @@ Optional file: `~/.config/omarchy/launcherplease.json` (hot-reloads on save). Fu
 
 | Key | Default | Meaning |
 |---|---|---|
-| `columns` | `8` | Grid columns |
-| `layout` | `compact` | `"compact"` packs small categories onto shared rows; `"roomy"` starts each category on its own row. Toggle live with `Ctrl+Tab` (persists) |
-| `showChords` | `true` | Show each app's shortcut as a keycap |
+| `columns` | `8` | Grid columns (ignored in list layout) |
+| `layout` | `compact` | `"compact"` packs small categories onto shared rows; `"roomy"` starts each category on its own row; `"list"` shows a right-docked full-height list whose width fits its content (icon · name · shortcut). Cycle live with `Ctrl+Tab` (persists) |
+| `showChords` | `true` | Show each app's shortcut (as keycaps in the grid, accent-tinted keys in the list) |
 | `showCategories` | `true` | Render category headers |
 | `captureChords` | `true` | While open, pressing an app's own shortcut confirms it (with the bounce) |
 | `duration` | `0` | Auto-close after N ms; `0` stays open |
