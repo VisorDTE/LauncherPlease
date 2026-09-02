@@ -1,6 +1,6 @@
 {
   "name": "jose.launcherplease",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "LauncherPlease — themed overlay grid of every app that has a shortcut.",
   "license": "MIT",
