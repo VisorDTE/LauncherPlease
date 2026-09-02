@@ -16,6 +16,17 @@ home="${HOME:-}"
 omarchy="${OMARCHY_PATH:-/usr/share/omarchy}"
 user_bindings="$home/.config/hypr/bindings.lua"
 
+# Hard bounds for everything read from disk or derived from bindings, so a
+# pathological theme/bindings tree cannot hang or balloon the shell. These are
+# far above any real desktop and only bite on hostile input.
+MAX_ICONS=4096          # themed icon files indexed
+MAX_DESKTOP_FILES=2048  # .desktop entries scanned
+MAX_DESKTOP_BYTES=65536 # bytes read from a single .desktop file
+MAX_BINDING_BYTES=262144 # bytes read from a single bindings .lua
+MAX_APPS=256            # emitted records
+MAX_FIELD_LEN=512       # per-field length cap before JSON construction
+MAX_LINE_LEN=8192       # per source line cap
+
 # ---------------------------------------------------------------- category
 declare -A ICON_BY_NAME=()   # upper-case app Name        -> Icon
 declare -A ICON_BY_URL=()    # webapp url in Exec         -> Icon
@@ -96,15 +107,19 @@ build_icon_index() {
   for ext in svg png xpm; do
     for appsdir in "${adirs[@]}"; do
       for f in "$appsdir"/*.$ext; do
+        [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break 2
         [[ -f $f || -L $f ]] || continue
         base="${f##*/}"
         name="${base%.$ext}"
         [[ -n $name && -z ${ICON_INDEX[$name]:-} ]] && ICON_INDEX["$name"]="$f"
       done
+      [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break
     done
+    [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break
   done
 
   for f in /usr/share/pixmaps/*.svg /usr/share/pixmaps/*.png; do
+    [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break
     [[ -f $f ]] || continue
     base="${f##*/}"
     name="${base%.*}"
@@ -114,20 +129,24 @@ build_icon_index() {
 
 load_desktop_entries() {
   local dir file name icon exec cats line key url first
+  local count=0
   for dir in "$home/.local/share/applications" "$home/.local/share/applications/kde" \
              /usr/local/share/applications /usr/share/applications /usr/share/applications/kde; do
     [[ -d $dir ]] || continue
     for file in "$dir"/*.desktop; do
+      [[ $count -ge $MAX_DESKTOP_FILES ]] && return 0
       [[ -f $file ]] || continue
+      count=$((count + 1))
       name="" icon="" exec="" cats=""
       while IFS= read -r line; do
+        [[ ${#line} -gt $MAX_LINE_LEN ]] && continue
         case "$line" in
           "Name="*) name="${line#Name=}" ;;
           "Icon="*) icon="${line#Icon=}" ;;
           "Exec="*) exec="${line#Exec=}" ;;
           "Categories="*) cats="${line#Categories=}" ;;
         esac
-      done <"$file"
+      done < <(head -c "$MAX_DESKTOP_BYTES" "$file")
       [[ -n $name ]] || continue
       key="${name^^}"
       [[ -n $icon && -z ${ICON_BY_NAME[$key]:-} ]] && ICON_BY_NAME["$key"]="$icon"
@@ -338,37 +357,47 @@ main() {
   build_icon_index
   load_desktop_entries
 
-  local json="[]" rec
   local files=()
   if [[ -d $omarchy/default/hypr/bindings ]]; then
     local f
     for f in "$omarchy"/default/hypr/bindings/*.lua; do [[ -f $f ]] && files+=("$f"); done
   fi
-  [[ -f $user_bindings ]] && files+=("$user_bindings")
+  [[ -f $user_bindings && ! -L $user_bindings ]] && files+=("$user_bindings")
 
+  # Collect TSV records (bounded) instead of building JSON per line.
+  local tsv=""
+  local app_count=0
   while IFS= read -r line; do
     [[ -z $line ]] && continue
-    rec="$line"
-    IFS=$'\x1f' read -r id label chord kind catg command icon glyph iconfont focus <<<"$rec"
-    json="$(
-      jq -nc \
-        --argjson arr "$json" \
-        --arg id "$id" --arg label "$label" --arg chord "$chord" \
-        --arg kind "$kind" --arg catg "$catg" --arg command "$command" \
-        --arg icon "$icon" --arg glyph "$glyph" --arg iconfont "$iconfont" \
-        '$arr + [{ id: $id, label: $label, chord: $chord, kind: $kind,
-                    category: $catg, command: $command, icon: $icon,
-                    glyph: $glyph, iconFont: $iconfont }]'
-    )"
+    [[ $app_count -ge $MAX_APPS ]] && break
+    tsv+="$line"$'\n'
+    app_count=$((app_count + 1))
   done < <(
     for file in "${files[@]}"; do
-      grep -n 'o\.bind(' "$file" 2>/dev/null | while IFS= read -r l; do
+      head -c "$MAX_BINDING_BYTES" "$file" 2>/dev/null | grep -n 'o\.bind(' 2>/dev/null | while IFS= read -r l; do
+        [[ ${#l} -gt $MAX_LINE_LEN ]] && continue
         parse_line "${l#*:}" ""
       done
     done
   )
 
-  printf '%s\n' "$json"
+  # Cap each field, then build the JSON array in one jq pass.
+  jq -R -s \
+    --argjson maxapp "$MAX_APPS" --arg maxlen "$MAX_FIELD_LEN" '
+    [ split("\n")[]
+      | select(length > 0)
+      | split("\u001f")
+      | { id: (.[0] | .[0:($maxlen|tonumber)]),
+          label: (.[1] | .[0:($maxlen|tonumber)]),
+          chord: (.[2] | .[0:($maxlen|tonumber)]),
+          kind: (.[3] | .[0:($maxlen|tonumber)]),
+          category: (.[4] | .[0:($maxlen|tonumber)]),
+          command: (.[5] | .[0:($maxlen|tonumber)]),
+          icon: (.[6] | .[0:($maxlen|tonumber)]),
+          glyph: (.[7] | .[0:($maxlen|tonumber)]),
+          iconFont: (.[8] | .[0:($maxlen|tonumber)]) } ]
+    | .[0:($maxapp|tonumber)]
+    ' <<<"$tsv"
 }
 
 main "$@"

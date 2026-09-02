@@ -59,3 +59,27 @@ test("layout selects roomy and list, rejects unknown values", () => {
   const payload = Config.merge("{}", JSON.stringify({ layout: "roomy" }))
   assert.equal(payload.layout, "roomy")
 })
+
+test("numeric config is clamped to sane ranges", () => {
+  const cfg = Config.merge(JSON.stringify({
+    columns: 100000, duration: 999999999, mostUsedDays: 99999, mostUsedCount: 99999
+  }), "{}")
+  assert.equal(cfg.columns, 24)
+  assert.equal(cfg.duration, 3600000)
+  assert.equal(cfg.mostUsedDays, 365)
+  assert.equal(cfg.mostUsedCount, 100)
+})
+
+test("oversized payload is rejected", () => {
+  const big = JSON.stringify({ columns: 8, junk: "x".repeat(100000) })
+  const cfg = Config.merge("{}", big)
+  // payload rejected -> defaults from file/defaults
+  assert.equal(cfg.columns, 8)
+})
+
+test("categories strips prototype-dangerous keys", () => {
+  const cfg = Config.merge(JSON.stringify({ categories: { "__proto__": "evil", "constructor": "evil", "Tmux": "System" } }), "{}")
+  assert.equal(cfg.categories.__proto__, undefined)
+  assert.equal(cfg.categories.constructor, undefined)
+  assert.equal(cfg.categories.Tmux, "System")
+})

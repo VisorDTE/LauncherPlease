@@ -19,7 +19,12 @@ test("scores sum launches across remaining days", () => {
     "2026-08-20": { steam: 2, terminal: 1 },
     "2026-08-30": { steam: 3, browser: 4 }
   }
-  assert.deepEqual(Usage.scores(days), { steam: 5, terminal: 1, browser: 4 })
+  const scores = Usage.scores(days)
+  assert.equal(scores.steam, 5)
+  assert.equal(scores.terminal, 1)
+  assert.equal(scores.browser, 4)
+  // Null-prototype: external ids must not collide with Object.prototype.
+  assert.equal(Object.getPrototypeOf(scores), null)
 })
 
 test("topIds ranks by count then id", () => {

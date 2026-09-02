@@ -3,30 +3,47 @@
 
 var DEFAULT_GROUP_ORDER = ["Most used", "Web apps", "Games", "Development", "Office", "Multimedia", "Internet", "System", "TUIs", "Apps"]
 
+var MAX_STR = 512
+
+// Null-prototype map: externally derived keys (labels, ids, categories) can
+// otherwise collide with Object.prototype names and corrupt lookups.
+function nullMap() {
+  return Object.create(null)
+}
+
+function cap(v) {
+  var s = String(v === undefined || v === null ? "" : v)
+  return s.length > MAX_STR ? s.slice(0, MAX_STR) : s
+}
+
 function normalizeApps(rawApps) {
   var values = rawApps || []
-  return values.map(function (raw, index) {
-    return {
-      index: index,
-      id: String(raw.id || ("app-" + index)),
-      label: String(raw.label || ""),
-      chord: String(raw.chord || ""),
-      kind: String(raw.kind || ""),
-      category: String(raw.category || "Apps"),
-      command: String(raw.command || ""),
-      icon: String(raw.icon || ""),
-      glyph: String(raw.glyph || ""),
-      iconFont: String(raw.iconFont || ""),
-      chordLabel: String(raw.chord || "")
-    }
-  })
+  var out = []
+  for (var i = 0; i < values.length && i < 256; i++) {
+    var raw = values[i]
+    if (!raw || typeof raw !== "object") continue
+    out.push({
+      index: i,
+      id: cap(raw.id || ("app-" + i)),
+      label: cap(raw.label),
+      chord: cap(raw.chord),
+      kind: cap(raw.kind),
+      category: cap(raw.category || "Apps"),
+      command: cap(raw.command),
+      icon: cap(raw.icon),
+      glyph: cap(raw.glyph),
+      iconFont: cap(raw.iconFont),
+      chordLabel: cap(raw.chord)
+    })
+  }
+  return out
 }
 
 function buildFilter(exclude) {
-  var set = {}
+  var set = nullMap()
   var values = exclude || []
-  for (var i = 0; i < values.length; i++) {
-    var v = String(values[i] || "").trim()
+  for (var i = 0; i < values.length && i < 64; i++) {
+    var v = cap(values[i]).trim()
     if (v) set[v.toLowerCase()] = true
   }
   return function (app) {
@@ -56,7 +73,7 @@ function matchesFilter(app, text) {
 // last in first-seen order.
 function orderedCategories(categories, groupOrder) {
   var order = groupOrder || DEFAULT_GROUP_ORDER
-  var seen = {}
+  var seen = nullMap()
   var out = []
   for (var i = 0; i < order.length; i++) {
     if (categories[order[i]]) {
@@ -93,19 +110,20 @@ function cloneAsMostUsed(app) {
 function arrange(apps, config, usageScores) {
   var cfg = config || {}
   var filter = buildFilter(cfg.exclude)
-  var favorites = {}
+  var favorites = nullMap()
   var favValues = cfg.favorites || []
-  for (var i = 0; i < favValues.length; i++) {
-    var f = String(favValues[i] || "").toLowerCase().trim()
+  for (var i = 0; i < favValues.length && i < 64; i++) {
+    var f = cap(favValues[i]).toLowerCase().trim()
     if (f) favorites[f] = true
   }
   var catOverride = cfg.categories || {}
 
   var filtered = apps.filter(filter)
-  var byId = {}
+  var byId = nullMap()
   for (var fidx = 0; fidx < filtered.length; fidx++) byId[filtered[fidx].id] = filtered[fidx]
 
   var mostLimit = Math.max(0, Math.floor(Number(cfg.mostUsedCount) || 8))
+  if (mostLimit > 100) mostLimit = 100
   var ranked = []
   if (usageScores && mostLimit > 0) {
     var ids = Object.keys(usageScores)
@@ -119,7 +137,7 @@ function arrange(apps, config, usageScores) {
     }
   }
 
-  var byCategory = {}
+  var byCategory = nullMap()
   if (ranked.length) byCategory["Most used"] = { favs: ranked, rest: [] }
   for (var j = 0; j < filtered.length; j++) {
     var app = filtered[j]

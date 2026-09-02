@@ -40,6 +40,7 @@ Item {
   readonly property string listPath: root.pluginDir + "/list.sh"
   readonly property string recordPath: root.pluginDir + "/record.sh"
   readonly property string setLayoutPath: root.pluginDir + "/set-layout.sh"
+  readonly property string chordPath: root.pluginDir + "/chords.sh"
   readonly property string usagePath: root.home + "/.local/state/omarchy/launcherplease/usage.json"
 
   property color background: Color.menu.background
@@ -193,7 +194,9 @@ Item {
   }
 
   function setFilter(text) {
-    root.filterText = text
+    var t = String(text || "")
+    if (t.length > 128) t = t.slice(0, 128)
+    root.filterText = t
     root.cursorIndex = 0
     root.rebuild()
   }
@@ -367,41 +370,28 @@ Item {
     return false
   }
 
-  function luaCmdLiteral(command) {
-    return String(command || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  }
-
-  function chordCaptureScript(bind) {
-    var lines = []
+  function chordPayloadJson() {
     var apps = LauncherModel.normalizeApps(root.rawApps)
+    var out = []
     var seen = {}
-    if (bind) {
-      for (var i = 0; i < apps.length; i++) {
-        var chord = apps[i].chord
-        if (!chord || seen[chord]) continue
-        seen[chord] = true
-        lines.push('hyprctl eval \'hl.unbind("' + chord + '")\'')
-        lines.push('hyprctl eval \'hl.bind("' + chord + '", hl.dsp.exec_cmd("omarchy-shell launcherplease launch ' + apps[i].id + '"), { description = "' + apps[i].label + '" })\'')
-      }
-      lines.push('hyprctl eval \'hl.unbind("ESCAPE")\'')
-      lines.push('hyprctl eval \'hl.bind("ESCAPE", hl.dsp.exec_cmd("omarchy-shell launcherplease close"), { description = "LauncherPlease close" })\'')
-    } else {
-      for (var j = 0; j < apps.length; j++) {
-        var chord2 = apps[j].chord
-        if (!chord2 || seen[chord2]) continue
-        seen[chord2] = true
-        lines.push('hyprctl eval \'hl.unbind("' + chord2 + '")\'')
-        lines.push('hyprctl eval \'hl.bind("' + chord2 + '", hl.dsp.exec_cmd("' + root.luaCmdLiteral(apps[j].command) + '"), { description = "' + apps[j].label + '" })\'')
-      }
-      lines.push('hyprctl eval \'hl.unbind("ESCAPE")\'')
+    for (var i = 0; i < apps.length; i++) {
+      var chord = apps[i].chord
+      if (!chord || seen[chord]) continue
+      seen[chord] = true
+      out.push({
+        chord: chord,
+        id: apps[i].id,
+        label: apps[i].label,
+        command: apps[i].command
+      })
     }
-    return lines.join("\n")
+    return JSON.stringify(out)
   }
 
   function startChordCapture() {
     if (!root.cfg.captureChords) return
     root.chordsCaptured = true
-    chordProc.command = ["bash", "-c", root.chordCaptureScript(true)]
+    chordProc.command = ["timeout", "-k", "2", "5", "bash", root.chordPath, "capture"]
     chordProc.running = false
     chordProc.running = true
   }
@@ -409,7 +399,7 @@ Item {
   function stopChordCapture() {
     if (!root.chordsCaptured) return
     root.chordsCaptured = false
-    chordProc.command = ["bash", "-c", root.chordCaptureScript(false)]
+    chordProc.command = ["timeout", "-k", "2", "5", "bash", root.chordPath, "restore"]
     chordProc.running = false
     chordProc.running = true
   }
@@ -455,14 +445,14 @@ Item {
 
   Process {
     id: listProc
-    command: ["bash", root.listPath]
+    command: ["timeout", "-k", "2", "8", "bash", root.listPath]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.onListLoaded(text)
     }
   }
 
-  Process { id: chordProc }
+  Process { id: chordProc; stdinEnabled: true; onStarted: { write(root.chordPayloadJson()); } }
   Process { id: recordProc }
   Process { id: setLayoutProc }
 
@@ -473,6 +463,16 @@ Item {
   Component.onCompleted: {
     root.applyConfig()
     root.refreshList()
+  }
+
+  Component.onDestruction: {
+    // If the shell dies while chords are captured, restore the bindings
+    // (best effort, bounded by the timeout wrapper in the command).
+    if (root.chordsCaptured) {
+      chordProc.command = ["timeout", "-k", "2", "5", "bash", root.chordPath, "restore"]
+      chordProc.running = false
+      chordProc.running = true
+    }
   }
 
   PanelWindow {
@@ -613,6 +613,7 @@ Item {
                 anchors.rightMargin: Style.spacing.sm
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.filterText ? root.filterText : "Buscar apps…"
+                textFormat: Text.PlainText
                 color: root.foreground
                 opacity: root.filterText ? 1 : 0.5
                 font.family: root.fontFamily
@@ -693,6 +694,7 @@ Item {
                     anchors.rightMargin: root.isList ? Style.spacing.md : 0
                     verticalAlignment: Text.AlignVCenter
                     text: root.cfg.showCategories && rowObj ? (rowObj.label + " · " + rowObj.count) : ""
+                    textFormat: Text.PlainText
                     color: root.accent
                     opacity: 0.85
                     font.family: root.fontFamily
@@ -737,6 +739,7 @@ Item {
                           verticalAlignment: Text.AlignVCenter
                           horizontalAlignment: Text.AlignRight
                           text: (cell.isCat && slot && slot.label) ? slot.label : ""
+                          textFormat: Text.PlainText
                           color: root.accent
                           opacity: 0.85
                           font.family: root.fontFamily
@@ -800,6 +803,7 @@ Item {
                               anchors.centerIn: parent
                               visible: !appIconImg.visible
                               text: cell.appGlyph || "󰈉"
+                              textFormat: Text.PlainText
                               color: hasCursor ? root.selectedText : root.foreground
                               font.family: cell.appFont ? cell.appFont : root.fontFamily
                               font.pixelSize: Style.font.displayLarge
@@ -814,6 +818,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: Style.spacing.md
                             text: cell.appLabel
+                            textFormat: Text.PlainText
                             color: hasCursor ? root.selectedText : root.foreground
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.caption
@@ -864,6 +869,7 @@ Item {
                                         id: keyText
                                         anchors.centerIn: parent
                                         text: keyLabel
+                                        textFormat: Text.PlainText
                                         color: cell.hasCursor ? root.keycapTextCursor : root.keycapText
                                         font.family: root.fontFamily
                                         font.pixelSize: root.keycapFont
@@ -941,6 +947,7 @@ Item {
                           anchors.centerIn: parent
                           visible: !listIconImg.visible
                           text: rowItem.listGlyph || "󰈉"
+                          textFormat: Text.PlainText
                           color: listItem.listHasCursor ? root.selectedText : root.foreground
                           font.family: rowItem.listIconFont ? rowItem.listIconFont : root.fontFamily
                           font.pixelSize: root.listIconH
@@ -954,6 +961,7 @@ Item {
                         anchors.rightMargin: Style.spacing.md
                         anchors.verticalCenter: parent.verticalCenter
                         text: rowItem.listLabel
+                        textFormat: Text.PlainText
                         color: listItem.listHasCursor ? root.selectedText : root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.body
@@ -990,6 +998,7 @@ Item {
                                 id: listKeyText
                                 anchors.centerIn: parent
                                 text: keyLabel
+                                textFormat: Text.PlainText
                                 color: listItem.listHasCursor ? root.keycapTextCursor : root.keycapText
                                 font.family: root.fontFamily
                                 font.pixelSize: root.keycapFont
@@ -1042,6 +1051,7 @@ Item {
               text: root.isList
                     ? "↑↓ mover   Tab categoría   Ctrl+Tab layout   ↵ abrir   Esc cerrar"
                     : "↑↓←→ mover   Tab categoría   Ctrl+Tab layout   ↵ abrir   Esc cerrar"
+              textFormat: Text.PlainText
               color: root.foreground
               opacity: 0.5
               font.family: root.fontFamily

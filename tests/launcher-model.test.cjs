@@ -73,3 +73,25 @@ test("arrange promotes most-used apps to the front", () => {
   assert.equal(result.apps[0].category, "Most used")
   assert.equal(result.apps[1].label, "ChatGPT")
 })
+
+test("arrange is safe against prototype-named labels and categories", () => {
+  const apps = [
+    { index: 0, id: "__proto__", label: "__proto__", category: "constructor", chord: "", command: "" },
+    { index: 1, id: "proto2", label: "prototype", category: "X", chord: "", command: "" },
+    { index: 2, id: "ok", label: "OK", category: "X", chord: "", command: "" }
+  ]
+  const result = Model.arrange(apps, { groupOrder: ["X"] })
+  // No crash, and the "ok" app still lands in its category.
+  assert.ok(result.apps.some((a) => a.label === "OK"))
+  assert.deepEqual(Object.getPrototypeOf(result.apps[0] || {}), Object.prototype)
+})
+
+test("normalizeApps bounds the number and length of records", () => {
+  const many = []
+  for (let i = 0; i < 300; i++) many.push({ id: "a" + i, label: "L" + i })
+  const normalized = Model.normalizeApps(many)
+  assert.ok(normalized.length <= 256)
+
+  const long = Model.normalizeApps([{ id: "x", label: "A".repeat(2000), chord: "", command: "" }])
+  assert.ok(long[0].label.length <= 512)
+})

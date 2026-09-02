@@ -1,5 +1,7 @@
 // Config merge for LauncherPlease: file config (~/.config/omarchy/launcherplease.json)
 // overrides defaults, IPC payload overrides the file. Pure for node --test.
+// All numeric/string inputs are clamped so hostile payloads cannot force the
+// shell into unbounded work.
 
 var DEFAULTS = {
   columns: 8,
@@ -17,9 +19,21 @@ var DEFAULTS = {
   effects: { pulse: true, glow: true, bounce: true }
 }
 
+// Hard ceilings, independent of theme scale.
+var LIMITS = {
+  columns: { min: 1, max: 24 },
+  duration: { min: 0, max: 3600000 },
+  mostUsedCount: { min: 0, max: 100 },
+  mostUsedDays: { min: 1, max: 365 },
+  maxStringLen: 512,
+  maxArrayLen: 64
+}
+
 function parseJson(raw, fallback) {
+  var s = String(raw || "")
+  if (s.length > 65536) return fallback
   try {
-    return JSON.parse(String(raw || ""))
+    return JSON.parse(s)
   } catch (e) {
     return fallback
   }
@@ -39,17 +53,44 @@ function numberOr(value, fallback) {
   return isFinite(n) && n >= 0 ? n : fallback
 }
 
+function clamp(value, lim) {
+  var n = Math.floor(numberOr(value, lim.min))
+  if (n < lim.min) n = lim.min
+  if (n > lim.max) n = lim.max
+  return n
+}
+
 function layoutOr(value, fallback) {
   if (value === "roomy" || value === "compact" || value === "list") return value
   return fallback
 }
 
+function cappedString(value) {
+  var s = String(value === undefined || value === null ? "" : value)
+  return s.length > LIMITS.maxStringLen ? s.slice(0, LIMITS.maxStringLen) : s
+}
+
 function stringArray(value) {
   if (!Array.isArray(value)) return []
   var out = []
-  for (var i = 0; i < value.length; i++) {
-    var v = String(value[i] || "").trim()
+  for (var i = 0; i < value.length && i < LIMITS.maxArrayLen; i++) {
+    var v = cappedString(value[i]).trim()
     if (v) out.push(v)
+  }
+  return out
+}
+
+// Categories is an externally keyed map; strip prototype-dangerous keys, bound
+// both the count and value lengths, and use a null-prototype object so
+// ordinary lookups can never hit Object.prototype.
+function safeCategories(value) {
+  if (!isObject(value)) return Object.create(null)
+  var out = Object.create(null)
+  var keys = Object.keys(value)
+  for (var i = 0; i < keys.length && i < LIMITS.maxArrayLen; i++) {
+    var k = keys[i]
+    if (k === "__proto__" || k === "constructor" || k === "prototype") continue
+    out[k] = cappedString(value[k])
   }
   return out
 }
@@ -74,22 +115,22 @@ function merge(fileRaw, payloadRaw) {
   if (groupOrder.length === 0) groupOrder = DEFAULTS.groupOrder
 
   return {
-    columns: Math.max(1, Math.floor(numberOr(payload.columns, numberOr(file.columns, DEFAULTS.columns)))),
+    columns: clamp(numberOr(payload.columns, numberOr(file.columns, DEFAULTS.columns)), LIMITS.columns),
     layout: layoutOr(payload.layout, layoutOr(file.layout, DEFAULTS.layout)),
     showChords: boolOr(payload.showChords, boolOr(file.showChords, DEFAULTS.showChords)),
     showCategories: boolOr(payload.showCategories, boolOr(file.showCategories, DEFAULTS.showCategories)),
     captureChords: boolOr(payload.captureChords, boolOr(file.captureChords, DEFAULTS.captureChords)),
-    duration: numberOr(payload.duration, numberOr(file.duration, DEFAULTS.duration)),
+    duration: clamp(numberOr(payload.duration, numberOr(file.duration, DEFAULTS.duration)), LIMITS.duration),
     groupOrder: stringArray(payload.groupOrder).length ? stringArray(payload.groupOrder) : groupOrder,
     favorites: stringArray(payload.favorites).length ? stringArray(payload.favorites) : stringArray(file.favorites),
     exclude: stringArray(file.exclude),
-    categories: isObject(file.categories) ? file.categories : {},
-    mostUsedCount: Math.max(0, Math.floor(numberOr(payload.mostUsedCount, numberOr(file.mostUsedCount, DEFAULTS.mostUsedCount)))),
-    mostUsedDays: Math.max(1, Math.floor(numberOr(payload.mostUsedDays, numberOr(file.mostUsedDays, DEFAULTS.mostUsedDays)))),
+    categories: safeCategories(file.categories),
+    mostUsedCount: clamp(numberOr(payload.mostUsedCount, numberOr(file.mostUsedCount, DEFAULTS.mostUsedCount)), LIMITS.mostUsedCount),
+    mostUsedDays: clamp(numberOr(payload.mostUsedDays, numberOr(file.mostUsedDays, DEFAULTS.mostUsedDays)), LIMITS.mostUsedDays),
     effects: mergeEffects(file.effects, payload.effects)
   }
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { DEFAULTS: DEFAULTS, parseJson: parseJson, boolOr: boolOr, numberOr: numberOr, stringArray: stringArray, layoutOr: layoutOr, merge: merge }
+  module.exports = { DEFAULTS: DEFAULTS, LIMITS: LIMITS, parseJson: parseJson, boolOr: boolOr, numberOr: numberOr, stringArray: stringArray, layoutOr: layoutOr, merge: merge }
 }
