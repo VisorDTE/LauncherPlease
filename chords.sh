@@ -3,10 +3,10 @@
 #
 # Temporarily rebinds each app's shortcut to the overlay's launch IPC while the
 # overlay is open, and restores the original bindings on close. Apps arrive as
-# a JSON array on stdin (bounded), one object per app:
+# a JSON array (bounded) as a positional argument, one object per app:
 #   { "chord": "...", "id": "...", "label": "...", "command": "..." }
 #
-# Usage: chords.sh capture | chords.sh restore
+# Usage: chords.sh capture|restore <apps_json>
 #
 # Each hyprctl invocation is built from argv (never a shell string built by
 # interpolation), Lua literals are escaped at every grammar boundary, and a
@@ -16,11 +16,12 @@
 set -euo pipefail
 
 mode="${1:-}"
-[[ $mode == "capture" || $mode == "restore" ]] || { echo "usage: chords.sh capture|restore" >&2; exit 2; }
+apps_json="${2:-}"
+[[ $mode == "capture" || $mode == "restore" ]] || { echo "usage: chords.sh capture|restore <apps_json>" >&2; exit 2; }
 
-# Bounded stdin: read at most MAX_BYTES.
+# Bounded input: truncate the app list to MAX_BYTES.
 MAX_BYTES=262144
-apps_json="$(head -c "$MAX_BYTES" || true)"
+apps_json="${apps_json:0:$MAX_BYTES}"
 
 # Escape a string for inclusion inside a Lua double-quoted literal: backslash,
 # double quote, newline, CR, and other control bytes become \ddd or \n/\r.

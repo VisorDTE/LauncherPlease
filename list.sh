@@ -16,12 +16,24 @@ home="${HOME:-}"
 omarchy="${OMARCHY_PATH:-/usr/share/omarchy}"
 user_bindings="$home/.config/hypr/bindings.lua"
 
+# Self-imposed wall-clock deadline, independent of any caller's timeout wrapper,
+# so a hostile tree cannot stall the shell past this bound. The watchdog's fds
+# are detached from the caller's pipes so a captured stdout stream still sees
+# EOF the moment this script exits.
+DEADLINE=12
+( sleep "$DEADLINE"; kill -ALRM "$$" 2>/dev/null ) </dev/null >/dev/null 2>&1 &
+watchdog_pid=$!
+trap 'exit 1' ALRM
+trap 'kill "$watchdog_pid" 2>/dev/null || true' EXIT
+
 # Hard bounds for everything read from disk or derived from bindings, so a
 # pathological theme/bindings tree cannot hang or balloon the shell. These are
 # far above any real desktop and only bite on hostile input.
 MAX_ICONS=4096          # themed icon files indexed
+MAX_ICON_DIRS=2048      # candidate apps/ directories enumerated
 MAX_DESKTOP_FILES=2048  # .desktop entries scanned
 MAX_DESKTOP_BYTES=65536 # bytes read from a single .desktop file
+MAX_BINDING_FILES=64    # bindings .lua files enumerated
 MAX_BINDING_BYTES=262144 # bytes read from a single bindings .lua
 MAX_APPS=256            # emitted records
 MAX_FIELD_LEN=512       # per-field length cap before JSON construction
@@ -84,38 +96,43 @@ declare -A CURATED_GLYPH_OMARCHY=(
 declare -A ICON_INDEX=()
 
 build_icon_index() {
-  # Index every icon theme's apps/ directory with shell globbing instead of
-  # find: themes live at <dir>/<theme>/<size>/apps, so the tree is shallow and
-  # cheap to enumerate. svg wins over png/xpm; first hit per name is kept.
+  # Enumerate icon theme apps/ dirs with `find` (streamed, symlink-safe, and
+  # budget-capped) instead of shell globs that materialize an unbounded array
+  # before any counter runs. svg wins over png/xpm; first hit per name is kept.
   local ext dir theme size appsdir f base name
   local -a adirs=()
+  local budget=$MAX_ICON_DIRS
+  local count=0
   local -a icon_dirs=("$home/.icons" "$home/.local/share/icons" /usr/local/share/icons /usr/share/icons)
-  shopt -s nullglob
   for dir in "${icon_dirs[@]}"; do
     [[ -d $dir ]] || continue
-    for theme in "$dir"/*/; do
-      theme="${theme%/}"
-      [[ -d "$theme/scalable/apps" ]] && adirs+=("$theme/scalable/apps")
-      for size in "$theme"/*/; do
-        size="${size%/}"
-        [[ -d "$size/apps" ]] && adirs+=("$size/apps")
-      done
-    done
+    while IFS= read -r -d '' theme; do
+      [[ $count -ge $budget ]] && break 3
+      if [[ -d "$theme/scalable/apps" ]]; then
+        adirs+=("$theme/scalable/apps")
+        count=$((count + 1))
+      fi
+      while IFS= read -r -d '' size; do
+        [[ $count -ge $budget ]] && break 3
+        if [[ -d "$size/apps" ]]; then
+          adirs+=("$size/apps")
+          count=$((count + 1))
+        fi
+      done < <(find "$theme" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+    done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
   done
-  shopt -u nullglob
 
   for ext in svg png xpm; do
     for appsdir in "${adirs[@]}"; do
-      for f in "$appsdir"/*.$ext; do
+      [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break 2
+      while IFS= read -r -d '' f; do
         [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break 2
-        [[ -f $f || -L $f ]] || continue
+        [[ -f $f ]] || continue
         base="${f##*/}"
         name="${base%.$ext}"
         [[ -n $name && -z ${ICON_INDEX[$name]:-} ]] && ICON_INDEX["$name"]="$f"
-      done
-      [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break
+      done < <(find "$appsdir" -mindepth 1 -maxdepth 1 -type f -name "*.$ext" -print0 2>/dev/null)
     done
-    [[ ${#ICON_INDEX[@]} -ge $MAX_ICONS ]] && break
   done
 
   for f in /usr/share/pixmaps/*.svg /usr/share/pixmaps/*.png; do
@@ -133,9 +150,8 @@ load_desktop_entries() {
   for dir in "$home/.local/share/applications" "$home/.local/share/applications/kde" \
              /usr/local/share/applications /usr/share/applications /usr/share/applications/kde; do
     [[ -d $dir ]] || continue
-    for file in "$dir"/*.desktop; do
-      [[ $count -ge $MAX_DESKTOP_FILES ]] && return 0
-      [[ -f $file ]] || continue
+    while IFS= read -r -d '' file; do
+      [[ $count -ge $MAX_DESKTOP_FILES ]] && break 2
       count=$((count + 1))
       name="" icon="" exec="" cats=""
       while IFS= read -r line; do
@@ -159,7 +175,7 @@ load_desktop_entries() {
       first="${first##*/}"
       [[ -n $first && -z ${ICON_BY_EXEC[$first]:-} ]] && ICON_BY_EXEC["$first"]="$icon"
       [[ -n $first && -z ${CAT_BY_EXEC[$first]:-} ]] && CAT_BY_EXEC["$first"]="$cats"
-    done
+    done < <(find "$dir" -mindepth 1 -maxdepth 1 -type f -name '*.desktop' -print0 2>/dev/null)
   done
 }
 
@@ -360,7 +376,10 @@ main() {
   local files=()
   if [[ -d $omarchy/default/hypr/bindings ]]; then
     local f
-    for f in "$omarchy"/default/hypr/bindings/*.lua; do [[ -f $f ]] && files+=("$f"); done
+    while IFS= read -r -d '' f; do
+      [[ ${#files[@]} -ge $MAX_BINDING_FILES ]] && break
+      [[ -f $f ]] && files+=("$f")
+    done < <(find "$omarchy"/default/hypr/bindings -mindepth 1 -maxdepth 1 -type f -name '*.lua' -print0 2>/dev/null)
   fi
   [[ -f $user_bindings && ! -L $user_bindings ]] && files+=("$user_bindings")
 

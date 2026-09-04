@@ -41,6 +41,8 @@ Item {
   readonly property string recordPath: root.pluginDir + "/record.sh"
   readonly property string setLayoutPath: root.pluginDir + "/set-layout.sh"
   readonly property string chordPath: root.pluginDir + "/chords.sh"
+  readonly property string stateioPath: root.pluginDir + "/stateio.py"
+  readonly property string configPath: root.home + "/.config/omarchy/launcherplease.json"
   readonly property string usagePath: root.home + "/.local/state/omarchy/launcherplease/usage.json"
 
   property color background: Color.menu.background
@@ -225,7 +227,7 @@ Item {
     root.isList = next === "list"
     root.rebuild()
     root.scrollToCursor()
-    setLayoutProc.command = ["bash", root.setLayoutPath, next]
+    setLayoutProc.command = ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/bash", root.setLayoutPath, next]
     setLayoutProc.running = false
     setLayoutProc.running = true
   }
@@ -318,7 +320,7 @@ Item {
 
   function recordUsage(id) {
     if (!id) return
-    recordProc.command = ["bash", root.recordPath, id, String(root.cfg.mostUsedDays)]
+    recordProc.command = ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/bash", root.recordPath, id, String(root.cfg.mostUsedDays)]
     recordProc.running = false
     recordProc.running = true
   }
@@ -391,7 +393,7 @@ Item {
   function startChordCapture() {
     if (!root.cfg.captureChords) return
     root.chordsCaptured = true
-    chordProc.command = ["timeout", "-k", "2", "5", "bash", root.chordPath, "capture"]
+    chordProc.command = ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/bash", root.chordPath, "capture", root.chordPayloadJson()]
     chordProc.running = false
     chordProc.running = true
   }
@@ -399,9 +401,19 @@ Item {
   function stopChordCapture() {
     if (!root.chordsCaptured) return
     root.chordsCaptured = false
-    chordProc.command = ["timeout", "-k", "2", "5", "bash", root.chordPath, "restore"]
+    chordProc.command = ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/bash", root.chordPath, "restore", root.chordPayloadJson()]
     chordProc.running = false
     chordProc.running = true
+  }
+
+  function readConfig() {
+    configReadProc.running = false
+    configReadProc.running = true
+  }
+
+  function readUsage() {
+    usageReadProc.running = false
+    usageReadProc.running = true
   }
 
   IpcHandler {
@@ -425,34 +437,60 @@ Item {
     }
   }
 
+  // Config and usage are read through stateio.py (held directory fd, no-follow
+  // open, owner check, byte cap). FileView is used only as a change trigger:
+  // preload is off and text() is never called, so no unbounded read happens.
   FileView {
-    path: root.home + "/.config/omarchy/launcherplease.json"
+    path: root.configPath
+    preload: false
     watchChanges: true
     printErrors: false
-    onLoaded: { root.fileConfigRaw = text() || "{}"; root.applyConfig(); root.rebuild() }
-    onFileChanged: reload()
-    onLoadFailed: { root.fileConfigRaw = "{}"; root.applyConfig(); root.rebuild() }
+    onFileChanged: root.readConfig()
   }
 
   FileView {
     path: root.usagePath
+    preload: false
     watchChanges: true
     printErrors: false
-    onLoaded: { root.usageRaw = text() || "{}"; if (root.rawApps.length) root.rebuild() }
-    onFileChanged: reload()
-    onLoadFailed: root.usageRaw = "{}"
+    onFileChanged: root.readUsage()
   }
 
   Process {
     id: listProc
-    command: ["timeout", "-k", "2", "8", "bash", root.listPath]
+    command: ["/usr/bin/timeout", "-k", "2", "8", "/usr/bin/bash", root.listPath]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.onListLoaded(text)
     }
   }
 
-  Process { id: chordProc; stdinEnabled: true; onStarted: { write(root.chordPayloadJson()); } }
+  Process {
+    id: configReadProc
+    command: ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/python3", root.stateioPath, "read-config"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.fileConfigRaw = String(text || "{}")
+        root.applyConfig()
+        root.rebuild()
+      }
+    }
+  }
+
+  Process {
+    id: usageReadProc
+    command: ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/python3", root.stateioPath, "read-usage"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.usageRaw = String(text || "{}")
+        if (root.rawApps.length) root.rebuild()
+      }
+    }
+  }
+
+  Process { id: chordProc }
   Process { id: recordProc }
   Process { id: setLayoutProc }
 
@@ -461,17 +499,28 @@ Item {
   Timer { id: bounceClearTimer; interval: 460; repeat: false; onTriggered: root.bounceIndex = -1 }
 
   Component.onCompleted: {
+    root.readConfig()
+    root.readUsage()
     root.applyConfig()
     root.refreshList()
   }
 
   Component.onDestruction: {
-    // If the shell dies while chords are captured, restore the bindings
-    // (best effort, bounded by the timeout wrapper in the command).
+    // Terminate/reap every tracked child process so none outlives the plugin.
+    listProc.running = false
+    recordProc.running = false
+    setLayoutProc.running = false
+    configReadProc.running = false
+    usageReadProc.running = false
+
     if (root.chordsCaptured) {
-      chordProc.command = ["timeout", "-k", "2", "5", "bash", root.chordPath, "restore"]
+      // Restore as a detached, timeout-bounded fail-safe whose lifetime
+      // outlives this QML component, so temporary Hyprland binds are always
+      // reverted even when the shell is tearing down.
+      chordProc.command = ["/usr/bin/timeout", "-k", "2", "5", "/usr/bin/bash", root.chordPath, "restore", root.chordPayloadJson()]
+      chordProc.startDetached()
+    } else {
       chordProc.running = false
-      chordProc.running = true
     }
   }
 
