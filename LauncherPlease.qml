@@ -813,7 +813,7 @@ Item {
                           anchors.fill: parent
                           anchors.margins: Style.space(2)
                           radius: root.cornerRadius
-                          color: hasCursor ? root.selectedBackground : (mouseArea.containsMouse ? Util.alpha(root.accent, 0.06) : "transparent")
+                          color: hasCursor ? root.selectedBackground : "transparent"
                           border.color: hasCursor && root.cfg.effects.glow ? root.accent : "transparent"
                           border.width: hasCursor && root.cfg.effects.glow ? Math.max(1, Style.space(2)) : 0
                           scale: isBouncing ? 1.08 : (hasCursor && root.cfg.effects.pulse ? 1.04 : 1)
@@ -938,10 +938,6 @@ Item {
                           anchors.fill: parent
                           hoverEnabled: true
                           cursorShape: Qt.PointingHandCursor
-                          onContainsMouseChanged: if (containsMouse && cell.appIndex >= 0) {
-                            root.cursorActive = true
-                            root.cursorIndex = cell.appIndex
-                          }
                           onClicked: {
                             if (cell.appIndex < 0) return
                             root.cursorIndex = cell.appIndex
@@ -1064,10 +1060,6 @@ Item {
                       anchors.fill: parent
                       hoverEnabled: true
                       cursorShape: Qt.PointingHandCursor
-                      onContainsMouseChanged: if (containsMouse && rowItem.listAppIndex >= 0) {
-                        root.cursorActive = true
-                        root.cursorIndex = rowItem.listAppIndex
-                      }
                       onClicked: {
                         if (rowItem.listAppIndex < 0) return
                         root.cursorIndex = rowItem.listAppIndex
